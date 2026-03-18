@@ -51,8 +51,13 @@ pub extern "C" fn runtime_new(options: *const RuntimeOptions) -> RuntimeOrFail {
 pub extern "C" fn runtime_free(runtime: *mut Runtime) {
     unsafe {
         let rt = Box::from_raw(runtime);
+
+        // TODO: Do we care enough about OTEL shutdown errors to make this throw?
+        rt.runtime.block_on(async {
+            tracing::shutdown_tracing()
+        }).ok();
+
         rt.runtime.shutdown_background();
-        tracing::shutdown_tracing();
     }
 }
 
@@ -119,17 +124,21 @@ pub extern "C" fn dynamic_array_free(runtime: *mut Runtime, array: *const Dynami
 static HANDLERS: Once = Once::new();
 impl Runtime {
     pub(crate) fn new(_options: &RuntimeOptions) -> Result<Runtime, std::io::Error> {
-        tracing::init_otlp_tracing(None).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-
         HANDLERS.call_once(|| {
             deltalake::aws::register_handlers(None);
             deltalake::azure::register_handlers(None);
             deltalake::gcp::register_handlers(None);
         });
-        tokio::runtime::Builder::new_multi_thread()
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
-            .build()
-            .map(|rt| Runtime { runtime: rt })
+            .build()?;
+
+        runtime.block_on(async {
+            tracing::init_tracing(None)
+        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+        Ok(Runtime { runtime })
     }
 
     pub(crate) fn create_session_context(max_spill_size: Option<usize>) -> DeltaSessionContext {
