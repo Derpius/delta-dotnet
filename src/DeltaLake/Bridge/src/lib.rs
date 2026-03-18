@@ -14,6 +14,8 @@ pub mod schema;
 #[macro_use]
 mod sql;
 pub mod table;
+mod tracing;
+
 use std::{collections::HashMap, mem::ManuallyDrop};
 
 use runtime::Runtime;

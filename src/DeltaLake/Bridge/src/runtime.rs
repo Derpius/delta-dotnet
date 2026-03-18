@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Once;
 use deltalake::delta_datafusion::{DeltaRuntimeEnvBuilder, DeltaSessionContext};
-use crate::ByteArray;
+use crate::{tracing, ByteArray};
 use crate::DynamicArray;
 use crate::Map;
 
@@ -52,6 +52,7 @@ pub extern "C" fn runtime_free(runtime: *mut Runtime) {
     unsafe {
         let rt = Box::from_raw(runtime);
         rt.runtime.shutdown_background();
+        tracing::shutdown_tracing();
     }
 }
 
@@ -118,6 +119,8 @@ pub extern "C" fn dynamic_array_free(runtime: *mut Runtime, array: *const Dynami
 static HANDLERS: Once = Once::new();
 impl Runtime {
     pub(crate) fn new(_options: &RuntimeOptions) -> Result<Runtime, std::io::Error> {
+        tracing::init_otlp_tracing(None).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
         HANDLERS.call_once(|| {
             deltalake::aws::register_handlers(None);
             deltalake::azure::register_handlers(None);
