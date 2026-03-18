@@ -11,6 +11,15 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+/*
+TODO:
+- Ensure provider respects OTEL_SDK_DISABLED env var
+- Write helper method to define the parent ID for all new spans
+  - TBD how that can be set for the child traces, may need to wrap every FFI call in a span, which probably isn't the worst
+- Instrument relevant methods (likely everything in table.rs) with the above helper
+- Expose config to set endpoint, and whether HTTP or gRPC is used
+*/
+
 static TRACER_PROVIDER: OnceLock<SdkTracerProvider> = OnceLock::new();
 
 pub fn init_tracing(endpoint: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
