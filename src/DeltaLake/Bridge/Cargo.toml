@@ -21,7 +21,6 @@ opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
 opentelemetry_sdk = "0.31.0"
 tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-opentelemetry-stdout = "0.31.0"
 
 [build-dependencies]
 cbindgen = { version="0.29", default-features=false }
