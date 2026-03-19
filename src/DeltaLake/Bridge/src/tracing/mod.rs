@@ -1,15 +1,18 @@
+mod error;
+
 use std::env;
-use std::sync::OnceLock;
+use std::sync::Mutex;
 
 use opentelemetry::global;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
-use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler, SdkTracerProvider};
 use tracing_opentelemetry::layer;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use crate::tracing::error::TracingError;
 
 /*
 TODO:
@@ -20,11 +23,13 @@ TODO:
 - Expose config to set endpoint, and whether HTTP or gRPC is used
 */
 
-static TRACER_PROVIDER: OnceLock<SdkTracerProvider> = OnceLock::new();
+static TRACER_PROVIDER: Mutex<Option<SdkTracerProvider>> = Mutex::new(None);
 
-pub fn init_tracing(endpoint: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    if TRACER_PROVIDER.get().is_some() {
-        return Ok(());
+pub fn init_tracing(endpoint: Option<&str>) -> Result<(), TracingError> {
+    let mut provider = TRACER_PROVIDER.lock()
+        .map_err(|err| TracingError::InternalError(err.to_string()))?;
+    if provider.is_some() {
+        return Err(TracingError::AlreadyInitialized);
     }
 
     let endpoint = endpoint
@@ -35,18 +40,19 @@ pub fn init_tracing(endpoint: Option<&str>) -> Result<(), Box<dyn std::error::Er
     let exporter = SpanExporter::builder()
         .with_tonic()
         .with_endpoint(endpoint)
-        .build()?;
+        .build()
+        .map_err(|err| TracingError::InternalError(err.to_string()))?;
 
     let resource = Resource::builder().with_service_name("delta-rs").build();
 
-    let provider = SdkTracerProvider::builder()
+    let new_provider = SdkTracerProvider::builder()
         .with_batch_exporter(exporter)
         .with_resource(resource)
         .with_id_generator(RandomIdGenerator::default())
         .with_sampler(Sampler::AlwaysOn)
         .build();
 
-    global::set_tracer_provider(provider.clone());
+    global::set_tracer_provider(new_provider.clone());
 
     let tracer = global::tracer("delta-rs");
     let telemetry = layer().with_tracer(tracer);
@@ -58,17 +64,28 @@ pub fn init_tracing(endpoint: Option<&str>) -> Result<(), Box<dyn std::error::Er
         .try_init()
         .ok();
 
-    TRACER_PROVIDER.set(provider.clone()).ok();
+    *provider = Some(new_provider);
     Ok(())
 }
 
-pub fn shutdown_tracing() -> OTelSdkResult {
-    if let Some(provider) = TRACER_PROVIDER.get() {
-        provider.shutdown()?;
+pub fn shutdown_tracing() -> Result<(), TracingError> {
+    let mut provider = TRACER_PROVIDER.lock()
+        .map_err(|err| TracingError::InternalError(err.to_string()))?;
 
-        Ok(())
+    if let Some(provider_ref) = provider.as_ref() {
+        let result = match provider_ref.shutdown() {
+            Ok(_) => Ok(()),
+            Err(OTelSdkError::AlreadyShutdown) => Ok(()),
+            Err(OTelSdkError::Timeout(duration)) => Err(TracingError::Timeout(duration)),
+            Err(OTelSdkError::InternalFailure(msg)) => Err(TracingError::InternalError(msg)),
+        };
+
+        if result.is_ok() {
+            *provider = None;
+        }
+
+        result
     } else {
-        panic!("No tracer provider set");
         Ok(())
     }
 }

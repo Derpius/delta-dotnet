@@ -123,7 +123,7 @@ pub extern "C" fn dynamic_array_free(runtime: *mut Runtime, array: *const Dynami
 
 static HANDLERS: Once = Once::new();
 impl Runtime {
-    pub(crate) fn new(_options: &RuntimeOptions) -> Result<Runtime, std::io::Error> {
+    pub(crate) fn new(_options: &RuntimeOptions) -> Result<Runtime, Box<dyn std::error::Error>> {
         HANDLERS.call_once(|| {
             deltalake::aws::register_handlers(None);
             deltalake::azure::register_handlers(None);
@@ -136,7 +136,7 @@ impl Runtime {
 
         runtime.block_on(async {
             tracing::init_tracing(None)
-        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        })?;
 
         Ok(Runtime { runtime })
     }
